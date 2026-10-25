@@ -2,7 +2,8 @@
 <html lang="th">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="theme-color" content="#111827">
 
   <title>Minesweeper</title>
@@ -46,9 +47,15 @@
         sans-serif;
     }
 
+    html {
+      -webkit-text-size-adjust: 100%;
+      touch-action: manipulation;
+    }
+
     button,
     select {
       font: inherit;
+      touch-action: manipulation;
     }
 
     .game-container {
@@ -128,9 +135,29 @@
       transition: transform 0.15s ease, background 0.15s ease;
     }
 
-    .primary-button:hover {
-      background: var(--accent-hover);
-      transform: translateY(-1px);
+    @media (hover: hover) {
+      .primary-button:hover {
+        background: var(--accent-hover);
+        transform: translateY(-1px);
+      }
+    }
+
+    .mode-button {
+      min-height: 44px;
+      padding: 0 16px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 10px;
+      color: var(--text);
+      background: #334155;
+      font-weight: 700;
+      cursor: pointer;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .mode-button[aria-pressed="true"] {
+      border-color: #facc15;
+      color: #422006;
+      background: #facc15;
     }
 
     .primary-button:active {
@@ -191,7 +218,9 @@
       border-radius: 6px;
       background: #334155;
       box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+      -webkit-user-select: none;
       user-select: none;
+      -webkit-touch-callout: none;
       touch-action: manipulation;
     }
 
@@ -215,10 +244,15 @@
       line-height: 1;
       cursor: pointer;
       -webkit-tap-highlight-color: transparent;
+      -webkit-user-select: none;
+      user-select: none;
+      -webkit-touch-callout: none;
     }
 
-    .cell:hover:not(.revealed) {
-      background: var(--cell-hidden-hover);
+    @media (hover: hover) {
+      .cell:hover:not(.revealed) {
+        background: var(--cell-hidden-hover);
+      }
     }
 
     .cell:focus-visible {
@@ -276,10 +310,6 @@
     }
 
     @media (max-width: 640px) {
-      :root {
-        --cell-size: 32px;
-      }
-
       body {
         padding: 10px;
       }
@@ -294,7 +324,8 @@
       }
 
       .control-group,
-      .primary-button {
+      .primary-button,
+      .mode-button {
         flex: 1 1 160px;
       }
 
@@ -348,6 +379,15 @@
       <button id="newGameButton" class="primary-button" type="button">
         เริ่มเกมใหม่
       </button>
+
+      <button
+        id="flagModeButton"
+        class="mode-button"
+        type="button"
+        aria-pressed="false"
+      >
+        🚩 โหมดปักธง: ปิด
+      </button>
     </section>
 
     <section class="scoreboard" aria-label="ข้อมูลเกม">
@@ -378,7 +418,7 @@
 
     <p class="instructions">
       คอมพิวเตอร์: คลิกซ้ายเพื่อเปิดช่อง และคลิกขวาเพื่อปักธง<br>
-      โทรศัพท์: แตะเพื่อเปิดช่อง และกดค้างเพื่อปักธง
+      iPad / โทรศัพท์: แตะเพื่อเปิดช่อง กดค้างหรือเปิด "โหมดปักธง" เพื่อปักธง
     </p>
   </main>
 
@@ -409,6 +449,13 @@
     const mineCounterElement = document.getElementById("mineCounter");
     const timerElement = document.getElementById("timer");
     const statusElement = document.getElementById("gameStatus");
+    const flagModeButton = document.getElementById("flagModeButton");
+    const boardWrapperElement = document.querySelector(".board-wrapper");
+
+    const MIN_CELL_SIZE = 28;
+    const MAX_CELL_SIZE = 48;
+    const LONG_PRESS_DELAY = 450;
+    const LONG_PRESS_MOVE_TOLERANCE = 10;
 
     let rows = 9;
     let columns = 9;
@@ -424,6 +471,10 @@
 
     let longPressTimer = null;
     let longPressTriggered = false;
+    let longPressStartX = 0;
+    let longPressStartY = 0;
+    let lastPointerType = "mouse";
+    let flagMode = false;
 
     function createEmptyCell(row, column) {
       return {
@@ -480,6 +531,7 @@
           button.addEventListener("contextmenu", handleRightClick);
 
           button.addEventListener("pointerdown", handlePointerDown);
+          button.addEventListener("pointermove", handlePointerMove);
           button.addEventListener("pointerup", cancelLongPress);
           button.addEventListener("pointercancel", cancelLongPress);
           button.addEventListener("pointerleave", cancelLongPress);
@@ -493,6 +545,37 @@
       }
 
       updateMineCounter();
+      fitBoardToScreen();
+    }
+
+    function fitBoardToScreen() {
+      const wrapperStyle = window.getComputedStyle(boardWrapperElement);
+      const boardStyle = window.getComputedStyle(boardElement);
+
+      const availableWidth =
+        boardWrapperElement.clientWidth -
+        parseFloat(wrapperStyle.paddingLeft) -
+        parseFloat(wrapperStyle.paddingRight) -
+        parseFloat(boardStyle.borderLeftWidth) -
+        parseFloat(boardStyle.borderRightWidth);
+
+      const boardTop =
+        boardWrapperElement.getBoundingClientRect().top + window.scrollY;
+      const availableHeight =
+        window.innerHeight - Math.min(boardTop, 320) - 90;
+
+      const sizeByWidth = Math.floor(availableWidth / columns);
+      const sizeByHeight = Math.floor(availableHeight / rows);
+
+      const cellSize = Math.max(
+        MIN_CELL_SIZE,
+        Math.min(MAX_CELL_SIZE, sizeByWidth, sizeByHeight)
+      );
+
+      document.documentElement.style.setProperty(
+        "--cell-size",
+        `${cellSize}px`
+      );
     }
 
     function handleCellClick(event) {
@@ -508,6 +591,11 @@
       const row = Number(event.currentTarget.dataset.row);
       const column = Number(event.currentTarget.dataset.column);
       const cell = board[row][column];
+
+      if (flagMode && !cell.revealed) {
+        toggleFlag(cell);
+        return;
+      }
 
       if (cell.flagged) {
         return;
@@ -540,7 +628,9 @@
     function handleRightClick(event) {
       event.preventDefault();
 
-      if (gameOver) {
+      // Touch long-press is handled in handlePointerDown; some browsers also
+      // fire contextmenu for it, which would toggle the flag twice.
+      if (gameOver || lastPointerType !== "mouse") {
         return;
       }
 
@@ -551,16 +641,22 @@
     }
 
     function handlePointerDown(event) {
+      lastPointerType = event.pointerType || "mouse";
+
       if (event.pointerType === "mouse") {
         return;
       }
 
+      cancelLongPress();
       longPressTriggered = false;
+      longPressStartX = event.clientX;
+      longPressStartY = event.clientY;
 
       const row = Number(event.currentTarget.dataset.row);
       const column = Number(event.currentTarget.dataset.column);
 
       longPressTimer = window.setTimeout(() => {
+        longPressTimer = null;
         longPressTriggered = true;
 
         if (navigator.vibrate) {
@@ -568,7 +664,23 @@
         }
 
         toggleFlag(board[row][column]);
-      }, 500);
+      }, LONG_PRESS_DELAY);
+    }
+
+    function handlePointerMove(event) {
+      if (longPressTimer === null) {
+        return;
+      }
+
+      const movedX = Math.abs(event.clientX - longPressStartX);
+      const movedY = Math.abs(event.clientY - longPressStartY);
+
+      if (
+        movedX > LONG_PRESS_MOVE_TOLERANCE ||
+        movedY > LONG_PRESS_MOVE_TOLERANCE
+      ) {
+        cancelLongPress();
+      }
     }
 
     function cancelLongPress() {
@@ -857,8 +969,32 @@
       );
     }
 
+    function toggleFlagMode() {
+      flagMode = !flagMode;
+      flagModeButton.setAttribute("aria-pressed", String(flagMode));
+      flagModeButton.textContent = flagMode
+        ? "🚩 โหมดปักธง: เปิด"
+        : "🚩 โหมดปักธง: ปิด";
+    }
+
+    let resizeFrame = null;
+
+    function handleResize() {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = null;
+        fitBoardToScreen();
+      });
+    }
+
     newGameButton.addEventListener("click", startNewGame);
     difficultyElement.addEventListener("change", startNewGame);
+    flagModeButton.addEventListener("click", toggleFlagMode);
+    window.addEventListener("resize", handleResize);
+    window.addEventListener("orientationchange", handleResize);
 
     startNewGame();
   </script>
